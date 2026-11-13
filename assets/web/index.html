@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0A192F">
+    <title>Merowe Medical City - Clinical Documentation</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="1000008518_2.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="vendor/pdf-lib.min.js"></script>
+    <script src="vendor/jspdf-shim.js"></script>
+    <script src="vendor/chart-shim.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+        }
+    </script>
+</head>
+<body>
+    <!-- ================= PIN SCREEN ================= -->
+    <div id="auth-screen">
+        <div class="pin-box">
+            <img id="authLogo" class="auth-logo" src="" alt="Hospital logo">
+            <h2 id="authHospitalName" class="auth-title">Merowe Medical City</h2>
+            <p id="authAppTitle" class="text-muted">Clinical Documentation System</p>
+            <label for="pinInput" class="pin-label">Enter access PIN</label>
+            <input type="password" id="pinInput" class="pin-input" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••">
+            <button class="btn btn-primary btn-block" onclick="app.verifyPin()">Unlock System</button>
+            <p id="pinError" class="error-text" style="display:none;">Incorrect PIN. Please try again.</p>
+        </div>
+    </div>
+
+    <!-- ================= APPLICATION ================= -->
+    <div id="app-container" style="display:none;">
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <img id="sidebarLogo" class="sidebar-logo" src="" alt="">
+                <div id="sidebarAppName" class="app-name">Clinical Documentation</div>
+            </div>
+            <div class="nav-items">
+                <div class="nav-item active" onclick="app.navigate('dashboard')">Dashboard</div>
+                <div class="nav-item" onclick="app.navigate('active-patients')">Active Patients</div>
+                <div class="nav-item" onclick="app.navigate('add-patient')">Admit Patient</div>
+                <div class="nav-item" onclick="app.navigate('search')">Global Search</div>
+                <div class="nav-item" onclick="app.navigate('archive')">Patient Archive</div>
+                <div class="nav-item" onclick="app.navigate('settings')">Settings</div>
+                <div class="nav-item" onclick="app.navigate('backup')">Backup &amp; Restore</div>
+                <div class="nav-item nav-lock" onclick="app.lockSystem()">Lock Application</div>
+            </div>
+        </nav>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="btn btn-outline menu-btn" aria-label="Menu" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+                    <h2 id="topbar-title">Dashboard</h2>
+                </div>
+                <button class="btn btn-outline" onclick="app.resetDashboardLayout()">Refresh</button>
+            </header>
+
+            <!-- Dashboard -->
+            <section id="dashboard" class="screen active">
+                <div class="grid-cards">
+                    <div class="card stat"><h3>Active Inpatients</h3><div class="value" id="dash-active">0</div></div>
+                    <div class="card stat alert"><h3>Patients with Alerts</h3><div class="value" id="dash-alerts">0</div></div>
+                    <div class="card stat"><h3>Admitted Today</h3><div class="value" id="dash-today">0</div></div>
+                    <div class="card stat" id="dashLabsCard" role="button" tabindex="0" onclick="app.openPendingLabs()" onkeydown="if(event.key==='Enter')app.openPendingLabs()"><h3>Pending Investigations</h3><div class="value" id="dash-labs">0</div><small class="tap-hint">Tap to review and attach results</small></div>
+                </div>
+
+                <h3 class="section-title">Start Ward Round</h3>
+                <div id="doctorRoundButtons" class="round-buttons"></div>
+
+                <h3 class="section-title">Recent Admissions</h3>
+                <div class="table-wrap">
+                <table class="table" id="recentActivityTable">
+                    <thead><tr><th>Admitted</th><th>MRN</th><th>Name</th><th>Diagnosis</th><th>Consultant</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                </div>
+            </section>
+
+            <!-- Ward round -->
+            <section id="ward-round" class="screen">
+                <h2 id="wardRoundTitle" class="page-title">Ward Round</h2>
+                <div id="wardRoundList"></div>
+            </section>
+
+            <!-- Active patients -->
+            <section id="active-patients" class="screen">
+                <div class="filter-bar">
+                    <input type="text" id="filterWard" class="form-control" placeholder="Filter by ward / bed" oninput="app.loadActivePatients()">
+                    <input type="text" id="filterDoc" class="form-control" placeholder="Filter by consultant" oninput="app.loadActivePatients()">
+                </div>
+                <div class="table-wrap">
+                <table class="table" id="activePatientsTable">
+                    <thead><tr><th>MRN</th><th>Name</th><th>Location</th><th>Diagnosis</th><th>Consultant</th><th>Alerts</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                </div>
+            </section>
+
+            <!-- Admission -->
+            <section id="add-patient" class="screen">
+                <form id="admissionForm" class="card form-card" onsubmit="app.handleAdmission(event)">
+                    <h3>Demographics</h3>
+                    <div class="form-row">
+                        <div class="form-group"><label>Full name <span class="req">*</span></label><input type="text" id="patName" class="form-control" dir="auto" required></div>
+                        <div class="form-group"><label>Sex <span class="req">*</span></label><select id="patSex" class="form-control" required><option>Male</option><option>Female</option></select></div>
+                        <div class="form-group"><label>Age (years) <span class="req">*</span></label><input type="number" id="patAge" class="form-control" min="0" max="130" required></div>
+                    </div>
+                    <h3>Admission</h3>
+                    <div class="form-row">
+                        <div class="form-group"><label>Ward / room / bed <span class="req">*</span></label><input type="text" id="patLocation" class="form-control" required></div>
+                        <div class="form-group"><label>Consultant in charge <span class="req">*</span></label><select id="patDoctor" class="form-control" required></select></div>
+                    </div>
+                    <div class="form-group"><label>Provisional diagnosis <span class="req">*</span></label><input type="text" id="patDiagnosis" class="form-control" required></div>
+                    <h3 class="alert-heading">Clinical alerts</h3>
+                    <div class="form-group"><label>Chronic illnesses <small>(blue alert)</small></label><input type="text" id="patChronic" class="form-control" placeholder="e.g. Hypertension, Diabetes mellitus"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Allergy status</label><select id="patAllergyStatus" class="form-control" onchange="app.toggleAllergy()"><option>Unknown</option><option>No Known Allergies</option><option>Allergies Present</option></select></div>
+                        <div class="form-group" id="allergyDetailsGroup" style="display:none;"><label>Specify allergies <span class="req">*</span></label><input type="text" id="patAllergyDetails" class="form-control" placeholder="Drug / food / other"></div>
+                    </div>
+                    <div class="form-actions"><button type="submit" class="btn btn-primary">Admit Patient</button></div>
+                </form>
+            </section>
+
+            <!-- Patient record -->
+            <section id="patient-record" class="screen">
+                <div id="activePatientHeader" class="patient-header"></div>
+                <nav class="tab-nav" role="tablist">
+                    <button class="tab-btn active" data-tab="tab-overview" onclick="clinical.openTab('tab-overview')">Overview</button>
+                    <button class="tab-btn" data-tab="tab-history-exam" onclick="clinical.openTab('tab-history-exam')">History &amp; Examination</button>
+                    <button class="tab-btn" data-tab="tab-pmh" onclick="clinical.openTab('tab-pmh')">Background</button>
+                    <button class="tab-btn" data-tab="tab-investigations" onclick="clinical.openTab('tab-investigations')">Investigations</button>
+                    <button class="tab-btn" data-tab="tab-progress" onclick="clinical.openTab('tab-progress')">Progress, Vitals &amp; Meds</button>
+                    <button class="tab-btn" data-tab="tab-discharge" onclick="clinical.openTab('tab-discharge')">Documents &amp; Discharge</button>
+                    <button class="tab-btn" data-tab="tab-previous" onclick="clinical.openTab('tab-previous')">Previous Admissions</button>
+                </nav>
+                <div id="tab-overview" class="clinical-tab card active-tab"></div>
+                <div id="tab-history-exam" class="clinical-tab card"></div>
+                <div id="tab-pmh" class="clinical-tab card"></div>
+                <div id="tab-investigations" class="clinical-tab card"></div>
+                <div id="tab-progress" class="clinical-tab card"></div>
+                <div id="tab-discharge" class="clinical-tab card"></div>
+                <div id="tab-previous" class="clinical-tab card"></div>
+            </section>
+
+            <!-- Search -->
+            <section id="search" class="screen">
+                <div class="card">
+                    <input type="search" id="globalSearchInput" class="form-control" placeholder="Search by name, MRN or diagnosis…" oninput="app.performSearch()">
+                    <div class="table-wrap" style="margin-top:1rem;">
+                    <table class="table" id="searchResults">
+                        <thead><tr><th>MRN</th><th>Name</th><th>Status</th><th>Action</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Archive -->
+            <section id="archive" class="screen">
+                <div class="card">
+                    <div class="table-wrap">
+                    <table class="table" id="archiveTable">
+                        <thead><tr><th>Discharged</th><th>MRN</th><th>Name</th><th>Diagnosis</th><th>Action</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Backup -->
+            <section id="backup" class="screen">
+                <div class="card">
+                    <h3>Export</h3>
+                    <p class="text-muted">Downloads every patient record as a JSON file. Keep copies somewhere safe.</p>
+                    <button class="btn btn-primary" onclick="docs.exportBackup()">Export full database (JSON)</button>
+                    <hr class="divider">
+                    <h3>Import</h3>
+                    <p class="text-muted">You will see a summary of what will change before anything is written.</p>
+                    <input type="file" id="importFile" class="form-control" accept=".json,application/json">
+                    <button class="btn btn-warning" onclick="docs.importBackup()" style="margin-top:1rem">Review import</button>
+                </div>
+            </section>
+
+            <!-- Settings -->
+            <section id="settings" class="screen">
+                <div class="card accent-blue">
+                    <h3>Hospital identity</h3>
+                    <p class="text-muted">These details appear on the sign-in screen, the sidebar and every PDF document.</p>
+                    <div class="form-row">
+                        <div class="form-group"><label>Hospital name</label><input type="text" id="setHospitalName" class="form-control"></div>
+                        <div class="form-group"><label>Application title</label><input type="text" id="setAppTitle" class="form-control"></div>
+                    </div>
+                    <div class="form-group"><label>Letterhead tagline</label><input type="text" id="setTagline" class="form-control"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Address</label><input type="text" id="setAddress" class="form-control" placeholder="Street, city"></div>
+                        <div class="form-group"><label>Telephone</label><input type="text" id="setPhone" class="form-control"></div>
+                    </div>
+                    <div class="logo-row">
+                        <img id="setLogoPreview" class="logo-preview" src="" alt="Current logo">
+                        <div class="form-group" style="flex:1">
+                            <label>Hospital logo <small>(PNG or JPEG, max 2 MB)</small></label>
+                            <input type="file" id="setLogoFile" class="form-control" accept="image/png, image/jpeg">
+                            <label class="check"><input type="checkbox" id="setResetLogo"> Restore built-in Merowe Medical City logo</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card accent-green">
+                    <h3>Access PIN</h3>
+                    <div class="form-group" style="max-width:260px"><label>New 4-digit PIN <small>(leave blank to keep current)</small></label><input type="password" id="setPin" class="form-control" inputmode="numeric" maxlength="4" autocomplete="new-password"></div>
+                    <label class="check"><input type="checkbox" id="setResetPin"> Restore default PIN (1234)</label>
+                </div>
+                <div class="form-actions" style="margin-bottom:1.5rem"><button class="btn btn-primary" onclick="app.saveSystemSettings()">Save settings</button></div>
+
+                <div class="card">
+                    <h3>Consultants</h3>
+                    <div class="inline-add">
+                        <input type="text" id="newDocName" class="form-control" placeholder="Dr. Full name">
+                        <button class="btn btn-primary" onclick="app.addDoctor()">Add consultant</button>
+                    </div>
+                    <ul id="doctorList" class="doctor-list"></ul>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- ================= MODALS ================= -->
+
+    <!-- Discharge summary -->
+    <div id="dischargeModal" class="modal" style="display:none;">
+        <div class="modal-content modal-wide">
+            <div class="modal-head">
+                <h2>Discharge Summary</h2>
+                <p class="text-muted">Everything below is pre-filled from the record. Edit any field before saving the PDF. Medication and investigation rows are one per line, separated by the | symbol.</p>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Date &amp; time of admission</label><input type="datetime-local" id="dcAdmit" class="form-control"></div>
+                <div class="form-group"><label>Discharge date &amp; time</label><input type="datetime-local" id="dcDate" class="form-control"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Discharge destination <span class="req">*</span></label>
+                    <input type="text" id="dcDestination" class="form-control" list="dcDestList" placeholder="Home, transferred, …">
+                    <datalist id="dcDestList"><option value="Home"><option value="Transferred to another facility"><option value="Against medical advice"><option value="Other"></datalist>
+                </div>
+            </div>
+            <div class="form-group"><label>Final diagnosis (primary &amp; associated)</label><textarea id="dcDiagnosis" class="form-control" rows="2"></textarea></div>
+            <div class="form-group"><label>Presenting complaint &amp; history (edit if needed)</label><textarea id="dcHistory" class="form-control" rows="4"></textarea></div>
+            <div class="form-group"><label>Treatment &amp; procedures during admission</label><textarea id="dcTreatment" class="form-control" rows="3"></textarea></div>
+            <div class="form-group"><label>Examination at discharge</label>
+                <div class="form-row vitals-row" style="margin-bottom:0.6rem">
+                    <input type="text" id="dcBP" class="form-control" placeholder="BP">
+                    <input type="text" id="dcHR" class="form-control" placeholder="HR">
+                    <input type="text" id="dcRR" class="form-control" placeholder="RR">
+                    <input type="text" id="dcTemp" class="form-control" placeholder="Temp">
+                    <input type="text" id="dcSpO2" class="form-control" placeholder="SpO2">
+                    <input type="text" id="dcGCS" class="form-control" placeholder="GCS">
+                </div>
+                <textarea id="dcExam" class="form-control" rows="3" placeholder="General and systemic findings at discharge"></textarea>
+            </div>
+            <div class="form-group"><label>Investigations &amp; key results <small>(date | test | status | result)</small></label><textarea id="dcInv" class="form-control" rows="3"></textarea></div>
+            <div class="form-group"><label>Condition at discharge <span class="req">*</span></label><textarea id="dcCondition" class="form-control" rows="2" placeholder="e.g. Afebrile, haemodynamically stable, tolerating oral diet"></textarea></div>
+            <div class="form-group"><label>Discharge medications <small>(drug | dose | route | frequency | dose times | duration)</small></label><textarea id="dcMeds" class="form-control" rows="4" placeholder="Ceftriaxone | 1 g | IV | OD | 08:00 | 5 days"></textarea></div>
+            <div class="form-group"><label>Follow-up plan, warning signs &amp; advice</label><textarea id="dcFollowUp" class="form-control" rows="3"></textarea></div>
+            <div class="form-row">
+                <div class="form-group"><label>Pending results</label><input type="text" id="dcPending" class="form-control"></div>
+                <div class="form-group"><label>Contact / extension</label><input type="text" id="dcContact" class="form-control"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="docs.executeDischargePDF()">Save as PDF</button>
+                <button class="btn btn-outline" onclick="document.getElementById('dischargeModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Referral form -->
+    <div id="referralModal" class="modal" style="display:none;">
+        <div class="modal-content modal-wide">
+            <div class="modal-head">
+                <h2>Clinical Referral</h2>
+                <p class="text-muted">Patient identity and admission details are taken from the record. Complete the referral details below.</p>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Date &amp; time of admission</label><input type="datetime-local" id="refAdmit" class="form-control"></div>
+                <div class="form-group"><label>Date &amp; time of referral</label><input type="datetime-local" id="refDate" class="form-control"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Referred to (doctor / specialty / facility) <span class="req">*</span></label><input type="text" id="refTarget" class="form-control" placeholder="e.g. Cardiology, Dr. … , Khartoum Teaching Hospital"></div>
+                <div class="form-group"><label>Urgency</label>
+                    <select id="refUrgency" class="form-control"><option>Routine</option><option>Urgent</option><option>Emergency</option></select></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Referring department</label><input type="text" id="refDept" class="form-control"></div>
+                <div class="form-group"><label>Contact / extension</label><input type="text" id="refContact" class="form-control"></div>
+                <div class="form-group"><label>Receiving contact</label><input type="text" id="refReceiving" class="form-control"></div>
+            </div>
+            <div class="form-group"><label>Reason for referral / clinical question <span class="req">*</span></label><textarea id="refReason" class="form-control" rows="2"></textarea></div>
+            <div class="form-group"><label>Relevant history, comorbidities &amp; allergies</label><textarea id="refHistory" class="form-control" rows="4"></textarea></div>
+            <div class="form-group"><label>Examination &amp; current clinical status</label><textarea id="refExam" class="form-control" rows="3"></textarea></div>
+            <label class="sub-label">Vital signs</label>
+            <div class="form-row vitals-row">
+                <input type="text" id="refBP" class="form-control" placeholder="BP">
+                <input type="text" id="refHR" class="form-control" placeholder="HR">
+                <input type="text" id="refRR" class="form-control" placeholder="RR">
+                <input type="text" id="refTemp" class="form-control" placeholder="Temp">
+                <input type="text" id="refSpO2" class="form-control" placeholder="SpO2">
+                <input type="text" id="refGCS" class="form-control" placeholder="GCS">
+            </div>
+            <div class="form-group" style="margin-top:1rem"><label>Investigations &amp; key results</label><textarea id="refInv" class="form-control" rows="2"></textarea></div>
+            <div class="form-group"><label>Treatment given &amp; response</label><textarea id="refTx" class="form-control" rows="2"></textarea></div>
+            <div class="form-group"><label>Current medications <small>(drug | dose | route | frequency | dose times | duration)</small></label><textarea id="refMeds" class="form-control" rows="4"></textarea></div>
+            <div class="form-group"><label>Specific request to receiving team</label><textarea id="refRequest" class="form-control" rows="2"></textarea></div>
+            <div class="form-row">
+                <div class="form-group"><label>Transport / escort requirements</label><input type="text" id="refTransport" class="form-control"></div>
+                <div class="form-group"><label>Isolation / infection alerts</label><input type="text" id="refIsolation" class="form-control"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="docs.executeReferralPDF()">Save as PDF</button>
+                <button class="btn btn-outline" onclick="document.getElementById('referralModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backup import review -->
+    <div id="importModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h2>Review import</h2>
+            <p id="importStats" class="text-muted" style="margin:1rem 0"></p>
+            <p id="conflictList" class="error-text" style="color:var(--amber-dark)"></p>
+            <div class="modal-actions">
+                <button class="btn btn-warning" onclick="docs.executeImport()">Import records</button>
+                <button class="btn btn-outline" onclick="docs.cancelImport()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Readmission -->
+    <div id="readmitModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-head">
+                <h2>Readmit Patient</h2>
+                <p class="text-muted">Opens a new admission with fresh History &amp; Examination, Investigations and Plan pages. The previous admission is kept under Previous Admissions.</p>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Date &amp; time of readmission</label><input type="datetime-local" id="rdAdmit" class="form-control"></div>
+                <div class="form-group"><label>Ward / room / bed</label><input type="text" id="rdLocation" class="form-control"></div>
+            </div>
+            <div class="form-group"><label>Consultant in charge</label><select id="rdDoctor" class="form-control"></select></div>
+            <div class="form-group"><label>Reason for readmission / provisional diagnosis <span class="req">*</span></label><input type="text" id="rdDiagnosis" class="form-control"></div>
+            <div class="form-group"><label>Chronic illnesses</label><input type="text" id="rdChronic" class="form-control"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Allergy status</label><select id="rdAllergyStatus" class="form-control"><option>Unknown</option><option>No Known Allergies</option><option>Allergies Present</option></select></div>
+                <div class="form-group"><label>Allergy details</label><input type="text" id="rdAllergyDetails" class="form-control"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="clinical.executeReadmit()">Open new admission</button>
+                <button class="btn btn-outline" onclick="document.getElementById('readmitModal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image viewer (gallery) -->
+    <div id="pendingLabsModal" class="modal" style="display:none;">
+        <div class="modal-content modal-wide">
+            <div class="modal-head">
+                <h2>Pending Investigations</h2>
+                <p class="text-muted">Take a photo or upload the result, add a note if needed, then press OK. The test moves to the patient's Investigations list.</p>
+            </div>
+            <div id="pendingLabsList"></div>
+            <div class="modal-actions"><button class="btn btn-outline" onclick="app.closePendingLabs()">Close</button></div>
+        </div>
+    </div>
+    <div id="imageViewerModal" class="modal viewer-modal" style="display:none;" onclick="if (event.target === this) clinical.closeViewer()">
+        <div class="viewer-stage">
+            <button class="viewer-close" onclick="clinical.closeViewer()" aria-label="Close viewer">&times;</button>
+            <button class="viewer-nav prev" onclick="clinical.galleryStep(-1)" aria-label="Previous image">&#8249;</button>
+            <div class="viewer-image-wrap"><img id="viewerImage" src="" alt="Investigation result"></div>
+            <button class="viewer-nav next" onclick="clinical.galleryStep(1)" aria-label="Next image">&#8250;</button>
+            <div class="viewer-caption"><span id="viewerCaption"></span><span id="viewerCount" class="viewer-count"></span></div>
+            <p class="viewer-hint">Use ← → keys or swipe to move between images · Esc to close</p>
+        </div>
+    </div>
+
+    <script src="logo-data.js"></script>
+    <script src="db.js"></script>
+    <script src="app.js"></script>
+    <script src="clinical.js"></script>
+    <script src="docs.js"></script>
+</body>
+</html>
